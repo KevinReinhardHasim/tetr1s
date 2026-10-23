@@ -129,9 +129,20 @@ test('rules: score, attack, damage', () => {
   eq(R.attack(R.info({lines: 4, b2b: true, combo: 2})), 6);
   eq(R.attack(R.info({lines: 3, runes: ['fire']}, true)), 4);
   eq(R.damage(R.info({lines: 4}), []), 72);
-  eq(R.damage(R.info({lines: 4}), ['keris']), 108);
+  eq(R.damage(R.info({lines: 4}), ['dagger']), 108);
   eq(R.damage(R.info({lines: 1, runes: ['fire', 'thunder']}), []), 37);
   eq(R.MONSTERS.length, 10);
+});
+
+test('dungeon tiers: 30 floors, monsters come back stronger', () => {
+  const R = TR.Rules;
+  eq(R.FLOORS, 30);
+  eq([R.floorMonster(1).name, R.floorMonster(1).hp], ['Slime', 90]);
+  eq([R.floorMonster(11).name, R.floorMonster(11).hp, R.floorMonster(11).tier], ['Elite Slime', 135, 1]);
+  const d = R.floorMonster(30);
+  eq([d.name, d.boss, d.every], ['Nightmare Dragon', true, 3]);
+  eq(d.intents.map(i => i.n || i.k), [3, 'flip', 4]);
+  eq(R.RELICS.map(r => r.id).indexOf('keris'), -1);
 });
 
 console.log('\n' + passed + ' passed, ' + failed + ' failed');

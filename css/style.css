@@ -94,6 +94,7 @@ select { background: var(--panel-2); border: 1px solid var(--line); border-radiu
 .card p { margin: 0; color: var(--soft); }
 .card .eyebrow { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--gold); font-weight: 600; }
 .card .headline { font-family: var(--display); font-size: 20px; color: var(--text); }
+.card .note-line { font-size: 13px; color: var(--gold); border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; }
 .stats { width: 100%; border-collapse: collapse; font-size: 13px; }
 .stats th { text-align: left; font-weight: 400; color: var(--muted); padding: 5px 0; border-bottom: 1px solid var(--line); }
 .stats td { text-align: right; padding: 5px 0; border-bottom: 1px solid var(--line); font-variant-numeric: tabular-nums; }

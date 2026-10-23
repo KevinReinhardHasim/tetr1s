@@ -12,8 +12,18 @@
   }
 
   class Mode {
-    constructor(app) { this.app = app; this.fx = new TR.Fx(); this.t = 0; this.hardJust = false; this.holdRect = null; this.done = false; this.endT = 0; this.result = null; this.shown = false; }
+    constructor(app) { this.app = app; this.fx = new TR.Fx(); this.t = 0; this.hardJust = false; this.holdRect = null; this.done = false; this.endT = 0; this.result = null; this.shown = false; this.shake = 0; }
     size(port) { return port ? PORT : LAND; }
+    kick(s) { this.shake = Math.max(this.shake, s); }
+    // Cleared blocks break into particles, column by column as the sweep passes.
+    burst(g, rows, pal) {
+      const geo = g.geo; if (!geo || !rows || !rows.length) return;
+      const pts = [];
+      rows.forEach(r => g.grid[r].forEach((v, X) => { if (v) pts.push({x: geo.x0 + X * geo.cs + geo.cs / 2, y: geo.y0 + (r - TR.HID) * geo.cs + geo.cs / 2, c: pal.piece[v.t] || pal.garbage, delay: g.o.clearDelay * .8 * X / 10}); }));
+      this.fx.burst(pts, geo.cs / 20);
+    }
+    // Runs while an overlay covers the game, so particles and idle animation keep moving.
+    fxOnly(dt) { this.t += dt; this.fx.update(dt); this.shake = Math.max(0, this.shake - dt); }
     sound(e, d) {
       const S = TR.Sfx;
       if (e === 'move') S.play('move');
@@ -31,13 +41,14 @@
     }
     popClear(i, cx, cy, color) {
       let y = cy; const lab = R.label(i);
-      if (lab) { this.fx.pop(lab, cx, y, color || '#FFFFFF', i.lines >= 4 || i.tspin || i.flip ? 17 : 14); y += 24; }
-      if (i.b2b && i.lines) { this.fx.pop('BACK-TO-BACK', cx, y, '#FFD166', 11, {mono: true}); y += 20; }
-      if (i.combo > 0 && i.lines) { this.fx.pop('COMBO ' + i.combo, cx, y, '#5EE0A0', 11, {mono: true}); y += 20; }
-      if (i.perfect) this.fx.pop('PERFECT CLEAR', cx, y, '#FFD166', 15, {life: 1.6});
+      if (lab) { this.fx.pop(lab, cx, y, color || '#FFFFFF', i.lines >= 4 || i.tspin || i.flip ? 17 : 14, {outline: true, bounce: true}); y += 24; }
+      if (i.b2b && i.lines) { this.fx.pop('BACK-TO-BACK', cx, y, '#FFD166', 11, {mono: true, outline: true}); y += 20; }
+      if (i.combo > 0 && i.lines) { this.fx.pop('COMBO ' + i.combo, cx, y, '#5EE0A0', 11, {mono: true, outline: true}); y += 20; }
+      if (i.perfect) this.fx.pop('PERFECT CLEAR', cx, y, '#FFD166', 15, {life: 1.6, outline: true, bounce: true});
     }
     // Shows the result card a moment after the run ends, so the last clear can be seen.
     endUpdate(dt) {
+      this.shake = Math.max(0, this.shake - dt);
       if (this.done && this.result && !this.shown) { this.endT += dt; if (this.endT > .9) { this.shown = true; this.app.showResult(this.result); } }
     }
     keyHint(x, X, Y, color, binds) {
@@ -81,6 +92,8 @@
         if (i.tspin) this.tspins++;
         this.maxCombo = Math.max(this.maxCombo, i.combo);
         this.popClear(i, this.bc.x, this.bc.y, i.flip ? '#FFD166' : '#FFFFFF');
+        this.burst(g, d.rows, TR.PAL.flip);
+        if (i.lines >= 4 || i.tspin || i.perfect) this.kick(.35);
         if (this.sub !== 'sprint') {
           const lv = Math.min(15, 1 + Math.floor(g.lines / 10));
           if (lv > g.level) { g.level = lv; this.fx.pop('LEVEL ' + lv, this.bc.x, this.bc.y + 90, '#5EE0A0', 15); TR.Sfx.play('level'); }
@@ -90,6 +103,7 @@
         this.left--;
         if (this.left <= 0) g.flipQueued = true;
       } else if (e === 'flipStart') { this.flips++; this.lastBonus = 0; }
+      else if (e === 'flip') this.kick(.2);
       else if (e === 'flipEnd') {
         this.left = this.every;
         if (!this.lastBonus) this.fx.pop('FLIPPED', this.bc.x, this.bc.y, '#E6ECFF', 14);
@@ -180,37 +194,44 @@
   }
 
   /* ===================== DUNGEON ===================== */
+  // 30 floors in three tiers (Normal, Elite, Nightmare). Each tier ends with a victory screen
+  // where the player continues or ends the run; clearing Nightmare ends it with a time record.
   class DungeonMode extends Mode {
     constructor(app) {
       super(app);
       this.kind = 'dungeon'; this.floor = 1; this.relics = []; this.dealt = 0; this.fightTime = 0; this.lines = 0;
       this.bc = {x: 119, y: 190}; this.port = false;
       this.ctrl = new TR.Controller(app.binds('solo'), app.settings, null);
-      this.bestFloor = app.best('dungeon');
       this.startFloor();
     }
     has(id) { return this.relics.indexOf(id) >= 0; }
     startFloor() {
-      const M = R.MONSTERS[this.floor - 1];
-      this.mon = {def: M, hp: M.hp, hpShow: M.hp, timer: M.every, idx: 0, flash: 0, shake: 0, atk: 0, dead: 0};
-      this.g = new TR.Game({seed: TR.randSeed(), preview: this.has('lontar') ? 5 : 3, onEvent: (e, d) => this.onEvent(e, d)});
-      this.g.level = 1 + Math.floor(this.floor * .7);
-      this.g.runeChance = this.has('akik') ? .45 : .3;
+      const M = R.floorMonster(this.floor);
+      this.mon = {def: M, hp: M.hp, hpShow: M.hp, timer: M.every, idx: 0, st: {atk: -1, hit: -1, dead: -1}};
+      this.g = new TR.Game({seed: TR.randSeed(), preview: this.has('scroll') ? 5 : 3, onEvent: (e, d) => this.onEvent(e, d)});
+      this.g.level = M.level;
+      this.g.runeChance = this.has('crystal') ? .45 : .3;
       this.pend = {thunder: 0, leaf: 0};
       this.killed = false; this.red = 0;
       this.state = 'intro'; this.st = 0;
     }
+    tierStart() { return this.floor > 1 && (this.floor - 1) % 10 === 0; }
     start() { }
-    update(dt, codes) {
-      this.t += dt; this.st += dt; this.fx.update(dt); this.endUpdate(dt);
-      const m = this.mon;
-      m.flash = Math.max(0, m.flash - dt); m.shake = Math.max(0, m.shake - dt); m.atk = Math.max(0, m.atk - dt); this.red = Math.max(0, this.red - dt * 1.6);
-      if (m.dead > 0) m.dead = Math.max(0, m.dead - dt);
+    stepMon(dt) {
+      const m = this.mon, s = m.st;
+      if (s.atk >= 0) { s.atk += dt; if (s.atk > 1) s.atk = -1; }
+      if (s.hit >= 0) { s.hit += dt; if (s.hit > .5) s.hit = -1; }
+      if (s.dead >= 0) s.dead += dt;
       m.hpShow += (m.hp - m.hpShow) * Math.min(1, dt * 3);
-      if (this.state === 'intro') { if (this.st >= 1.6) { this.state = 'fight'; this.g.start(); } return; }
+      this.red = Math.max(0, this.red - dt * 1.6);
+    }
+    fxOnly(dt) { super.fxOnly(dt); this.stepMon(dt); }
+    update(dt, codes) {
+      this.t += dt; this.st += dt; this.fx.update(dt); this.endUpdate(dt); this.stepMon(dt);
+      if (this.state === 'intro') { if (this.st >= (this.tierStart() ? 2.4 : 1.6)) { this.state = 'fight'; this.g.start(); } return; }
       if (this.state === 'fight') { this.fightTime += dt; this.ctrl.update(dt, this.g, codes); this.g.update(dt); return; }
       if (this.state === 'dying' && this.st >= 1.4) {
-        if (this.floor >= 10) this.finish(true);
+        if (this.floor % 10 === 0) this.tierCleared();
         else { this.state = 'choose'; this.offerRelics(); }
       }
     }
@@ -222,26 +243,29 @@
         this.lines += i.lines;
         const dmg = R.damage(i, this.relics);
         this.popClear(i, this.bc.x, this.bc.y, '#FFE2B0');
+        this.burst(g, d.rows, TR.PAL.dungeon);
+        if (i.lines >= 4 || i.tspin || i.perfect) this.kick(.3);
         if (dmg > 0) {
           m.hp = Math.max(0, m.hp - dmg); this.dealt += dmg;
           if (m.hp <= 0) this.killed = true;
           const row = d.rows && d.rows.length ? d.rows[0] - TR.HID : 10;
           const from = this.boardPoint(row), to = this.monPoint();
           this.fx.shot(from.x, from.y, to.x, to.y, i.fire ? TR.RUNE_COLOR.fire : '#FFE2B0', () => {
-            m.flash = .25; m.shake = .3; TR.Sfx.play('hit');
-            this.fx.pop('-' + dmg, to.x + (Math.random() - .5) * 40, to.y - 50, '#FFD1A8', 20);
+            if (m.st.dead < 0) m.st.hit = 0;
+            TR.Sfx.play('hit');
+            this.fx.pop('-' + dmg, to.x + (Math.random() - .5) * 40, to.y - 50, '#FFD1A8', this.port ? 16 : 22, {outline: true, bounce: true});
           });
         }
-        let oy = 0; const say = (s, c) => { this.fx.pop(s, this.bc.x, this.bc.y + 60 + oy, c, 11, {mono: true, life: 1.5}); oy += 18; };
+        let oy = 0; const say = (s, c) => { this.fx.pop(s, this.bc.x, this.bc.y + 60 + oy, c, 11, {mono: true, life: 1.5, outline: true}); oy += 18; };
         if (i.fire) say('Fire +' + i.fire * 15, TR.RUNE_COLOR.fire);
         if (i.thunder) { this.pend.thunder += i.thunder; say('Thunder: column cleared', TR.RUNE_COLOR.thunder); }
-        if (i.ice) { m.timer += i.ice * (this.has('jimat') ? 4 : 2); say('Ice: attack delayed', TR.RUNE_COLOR.ice); }
-        if (i.leaf) { this.pend.leaf += i.leaf * (this.has('kendi') ? 2 : 1); say('Leaf: garbage removed', TR.RUNE_COLOR.leaf); }
+        if (i.ice) { m.timer += i.ice * (this.has('amulet') ? 4 : 2); say('Ice: attack delayed', TR.RUNE_COLOR.ice); }
+        if (i.leaf) { this.pend.leaf += i.leaf * (this.has('flask') ? 2 : 1); say('Leaf: garbage removed', TR.RUNE_COLOR.leaf); }
       } else if (e === 'afterLock' || e === 'flipEnd') {
         this.applyPending();
         if (this.killed) { this.kill(); return; }
         if (e === 'afterLock') { m.timer--; if (m.timer <= 0) this.attack(); }
-      } else if (e === 'topout') this.finish(false);
+      } else if (e === 'topout') this.finish('lost');
     }
     applyPending() {
       const g = this.g;
@@ -249,21 +273,38 @@
       for (; this.pend.leaf > 0; this.pend.leaf--) g.removeGarbageRow();
     }
     kill() {
-      this.g.halted = true; this.state = 'dying'; this.st = 0; this.mon.dead = 1.2;
+      this.g.halted = true; this.state = 'dying'; this.st = 0; this.mon.st.dead = 0; this.mon.st.atk = -1;
       TR.Sfx.play('win');
-      this.fx.pop(this.mon.def.name.toUpperCase() + ' DEFEATED', this.monPoint().x, this.monPoint().y - 70, '#FFC46B', 15, {life: 1.6});
+      const p = this.monPoint();
+      this.fx.pop(this.mon.def.name.toUpperCase() + ' DEFEATED', this.port ? 180 : p.x, p.y - 70, '#FFC46B', this.port ? 12 : 15, {life: 1.6, outline: true});
     }
     attack() {
       const g = this.g, m = this.mon, M = m.def, it = M.intents[m.idx % M.intents.length];
-      m.idx++; m.timer = M.every; m.atk = .8; TR.Sfx.play('attack');
-      const p = this.monPoint();
+      m.idx++; m.timer = M.every; m.st.atk = 0; TR.Sfx.play('attack');
+      const p = this.monPoint(), say = (s, c) => this.fx.pop(s, this.bc.x, this.bc.y + 150, c, 13, {mono: true, outline: true});
       if (it.k === 'garbage') {
-        const n = Math.max(0, it.n - (this.has('batik') ? 1 : 0));
-        if (n) { g.addGarbage(n, Math.floor(g.aux() * TR.COLS)); this.red = .6; this.fx.pop('+' + n + ' garbage', this.bc.x, this.bc.y + 150, '#FF9A8A', 13, {mono: true}); }
-        else this.fx.pop('Batik blocked it', p.x, p.y - 70, '#FFC46B', 12, {mono: true});
-      } else if (it.k === 'lock') { g.holdLocked = it.n; this.fx.pop('HOLD locked', this.bc.x, this.bc.y + 150, '#FF9A8A', 13, {mono: true}); }
-      else if (it.k === 'fog') { g.fog = it.n; this.fx.pop('NEXT hidden', this.bc.x, this.bc.y + 150, '#FF9A8A', 13, {mono: true}); }
-      else { g.flipQueued = true; this.fx.pop('Your board flips!', this.bc.x, this.bc.y + 150, '#FFC46B', 13, {mono: true}); }
+        const n = Math.max(0, it.n - (this.has('shield') ? 1 : 0));
+        if (n) { g.addGarbage(n, Math.floor(g.aux() * TR.COLS)); this.red = .6; this.kick(.25); say('+' + n + ' garbage', '#FF9A8A'); }
+        else this.fx.pop('Shield blocked it', p.x, p.y - 70, '#FFC46B', 12, {mono: true, outline: true});
+      } else if (it.k === 'lock') { g.holdLocked = it.n; say('HOLD locked', '#FF9A8A'); }
+      else if (it.k === 'fog') { g.fog = it.n; say('NEXT hidden', '#FF9A8A'); }
+      else { g.flipQueued = true; this.kick(.3); say('Your board flips!', '#FFC46B'); }
+    }
+    stats() {
+      return [['Floor reached', this.floor + ' / ' + R.FLOORS], ['Tier', R.TIERS[R.tierOf(this.floor)].name], ['Damage dealt', TR.fmtNum(this.dealt)], ['Lines', this.lines],
+        ['Relics', this.relics.length ? this.relics.map(id => R.RELICS.find(r => r.id === id).name).join(', ') : 'None'], ['Time', TR.fmtTime(this.fightTime)]];
+    }
+    tierCleared() {
+      const tier = R.tierOf(this.floor), S = this.size(this.port);
+      this.state = 'victory';
+      this.fx.confetti(S.w, S.h, 120); TR.Sfx.play('win'); this.kick(.2);
+      if (tier >= R.TIERS.length - 1) { this.finish('conquered'); return; }
+      const next = R.TIERS[tier + 1];
+      this.app.showResult({eyebrow: 'Tier cleared', title: R.TIERS[tier].name + ' cleared', headline: 'Floors 1–' + this.floor + ' in ' + TR.fmtTime(this.fightTime), note: next.note, stats: this.stats(), noEsc: true,
+        buttons: [
+          {label: 'Continue to ' + next.name, fn: () => { this.app.closeOverlay(); this.state = 'choose'; this.offerRelics(); }},
+          {label: 'End run', fn: () => { this.app.closeOverlay(); this.finish('ended'); }}
+        ]});
     }
     offerRelics() {
       const pool = R.RELICS.filter(r => !this.has(r.id)), pick = [];
@@ -275,46 +316,49 @@
         onPick: r => { this.relics.push(r.id); TR.Sfx.play('select'); next(); }
       });
     }
-    finish(win) {
+    finish(how) {
       if (this.done) return;
       this.done = true; this.g.halted = true; this.g.paused = true; this.state = 'over';
-      if (!win) TR.Sfx.play('over');
-      const reached = win ? 11 : this.floor;
-      const isBest = this.app.saveBest('dungeon', reached, (a, b) => a > b);
-      this.result = {title: win ? 'Dungeon cleared' : 'Run over', headline: win ? 'All 10 floors' : 'Floor ' + this.floor + ' · ' + this.mon.def.name, isBest, stats: [
-        ['Floor reached', win ? '10 / 10' : this.floor + ' / 10'], ['Damage dealt', TR.fmtNum(this.dealt)], ['Lines', this.lines],
-        ['Relics', this.relics.length ? this.relics.map(id => R.RELICS.find(r => r.id === id).name).join(', ') : 'None'], ['Time', TR.fmtTime(this.fightTime)]
-      ]};
+      if (how === 'lost') TR.Sfx.play('over');
+      const floorBest = this.app.saveBest('dungeonFloor', this.floor, (a, b) => a > b);
+      const timeBest = how === 'conquered' && this.app.saveBest('dungeonTime', this.fightTime, (a, b) => a < b);
+      const tierName = R.TIERS[R.tierOf(this.floor)].name;
+      const title = how === 'conquered' ? 'Dungeon conquered' : how === 'ended' ? 'Run ended' : 'Run over';
+      const headline = how === 'conquered' ? 'All ' + R.FLOORS + ' floors in ' + TR.fmtTime(this.fightTime)
+        : how === 'ended' ? tierName + ' cleared · floor ' + this.floor : 'Floor ' + this.floor + ' · ' + this.mon.def.name;
+      const eyebrow = how === 'conquered' ? (timeBest ? 'New record · fastest clear' : 'Victory') : floorBest ? 'New record · highest floor' : '';
+      this.result = {title, headline, eyebrow, isBest: how === 'conquered' ? timeBest : floorBest, stats: this.stats()};
     }
     boardPoint(row) { return this.port ? {x: 121, y: 152 + row * 21} : {x: 119, y: 40 + row * 19}; }
-    monPoint() { return this.port ? {x: 92, y: 92} : {x: 480, y: 180}; }
+    monPoint() { return this.port ? {x: 92, y: 80} : {x: 480, y: 180}; }
     intentBox(x, X, Y, w, h, pal, big) {
       const m = this.mon, M = m.def, it = M.intents[m.idx % M.intents.length], urgent = m.timer <= 1;
-      TR.rr(x, X, Y, w, h, 8); x.fillStyle = '#2E211A'; x.fill(); x.strokeStyle = urgent ? '#FF8A5B' : '#6B4D38'; x.lineWidth = 1.5; x.stroke();
+      TR.rr(x, X, Y, w, h, 8); x.fillStyle = 'rgba(46,33,26,.92)'; x.fill(); x.strokeStyle = urgent ? TR.alpha('#FF8A5B', .6 + .4 * Math.sin(this.t * 10)) : '#6B4D38'; x.lineWidth = 1.5; x.stroke();
       T(x, 'ATTACK IN', X + 10, Y + 16, fm(9, 600), pal.muted);
       T(x, String(Math.max(0, m.timer)), X + 10, Y + h - 12, fd(big ? 22 : 18), '#FF8A5B');
       T(x, m.timer === 1 ? 'piece' : 'pieces', X + (big ? 30 : 28), Y + h - 26, fm(9), pal.muted);
       T(x, R.intentText(it), X + (big ? 30 : 28), Y + h - 12, fm(10, 600), pal.text);
     }
-    hpBar(x, X, Y, w, pal) {
+    hpBar(x, X, Y, w) {
       const m = this.mon;
       TR.rr(x, X, Y, w, 9, 4.5); x.fillStyle = '#3A2420'; x.fill();
       const wg = w * Math.max(0, m.hpShow) / m.def.hp, wh = w * m.hp / m.def.hp;
       if (wg > 1) { TR.rr(x, X, Y, wg, 9, 4.5); x.fillStyle = '#F2B6A0'; x.fill(); }
-      if (wh > 1) { TR.rr(x, X, Y, wh, 9, 4.5); x.fillStyle = '#D9453B'; x.fill(); }
-    }
-    torch(x, X, Y) {
-      x.fillStyle = '#4A3526'; x.fillRect(X - 3, Y, 6, 34);
-      const f = 1 + .15 * Math.sin(this.t * 13 + X) + .1 * Math.sin(this.t * 7.3 + X);
-      x.fillStyle = '#FF8A3D'; x.beginPath(); x.ellipse(X, Y - 8 * f, 7, 12 * f, 0, 0, 7); x.fill();
-      x.fillStyle = '#FFD86B'; x.beginPath(); x.ellipse(X, Y - 5 * f, 3.5, 6 * f, 0, 0, 7); x.fill();
+      if (wh > 1) { TR.rr(x, X, Y, wh, 9, 4.5); const g = x.createLinearGradient(0, Y, 0, Y + 9); g.addColorStop(0, '#FF6A5A'); g.addColorStop(1, '#B8302A'); x.fillStyle = g; x.fill(); }
     }
     floorDots(x, X, Y, pal) {
+      const local = (this.floor - 1) % 10 + 1, tc = TR.TIER_COLOR[R.tierOf(this.floor)];
       for (let i = 1; i <= 10; i++) {
-        const dx = X + (i - 1) * 9.4; x.fillStyle = i < this.floor ? '#8A6A4E' : i === this.floor ? pal.gold : '#3A2C22'; x.beginPath();
+        const dx = X + (i - 1) * 9.4; x.fillStyle = i < local ? '#8A6A4E' : i === local ? (R.tierOf(this.floor) ? tc : pal.gold) : '#3A2C22'; x.beginPath();
         if (R.MONSTERS[i - 1].boss) { x.moveTo(dx, Y - 5); x.lineTo(dx + 4, Y); x.lineTo(dx, Y + 5); x.lineTo(dx - 4, Y); x.closePath(); } else x.arc(dx, Y, 3, 0, 7);
         x.fill();
       }
+    }
+    // tierX places the tier name; by default it follows the floor text.
+    floorLabel(x, X, Y, size, pal, tierX) {
+      const tier = R.tierOf(this.floor), M = this.mon.def;
+      x.font = fm(size, 600); const txt = 'FLOOR ' + this.floor + '/' + R.FLOORS; T(x, txt, X, Y, fm(size, 600), M.boss ? pal.gold : pal.text);
+      if (tier) T(x, R.TIERS[tier].name.toUpperCase(), tierX != null ? tierX : X + x.measureText(txt).width + 8, Y, fm(size, 600), TR.TIER_COLOR[tier]);
     }
     draw(x, port) {
       const g = this.g, pal = TR.PAL.dungeon, S = this.size(port), M = this.mon.def, n = g.o.preview;
@@ -323,15 +367,14 @@
       const runes = [['fire', 'Fire +dmg'], ['ice', 'Ice delay'], ['thunder', 'Thunder col'], ['leaf', 'Leaf -row']];
       if (port) {
         this.bc = {x: 121, y: 300};
-        x.save(); TR.rr(x, 12, 8, 336, 136, 12); x.fillStyle = pal.panel; x.fill(); x.clip();
-        x.fillStyle = '#2A1E17'; x.beginPath(); x.arc(92, 146, 84, Math.PI, 0); x.fill();
-        x.fillStyle = '#1A120E'; x.fillRect(12, 124, 336, 22);
-        TR.drawMonster(x, M.id, 92, 82, M.boss ? .5 : .44, this.t, this.mon);
+        x.save(); TR.rr(x, 12, 8, 336, 136, 12); x.clip();
+        TR.dungeonBg(x, 12, 8, 336, 136, this.t, M.tier, {archX: 80, archR: 62, torches: [16, 160], dust: 10});
+        TR.drawMonster(x, M.id, 92, 80, M.boss ? .48 : .42, this.t, this.mon.st, M.tier);
         x.restore();
-        T(x, M.name, 178, 30, fd(12), pal.text); T(x, Math.ceil(this.mon.hp) + '/' + M.hp, 340, 30, fm(10, 600), pal.muted, 'right');
-        this.hpBar(x, 178, 38, 162, pal);
+        T(x, M.base, 178, 30, fd(12), M.boss ? pal.gold : pal.text); T(x, Math.ceil(this.mon.hp) + '/' + M.hp, 340, 30, fm(10, 600), pal.muted, 'right');
+        this.hpBar(x, 178, 38, 162);
         this.intentBox(x, 178, 56, 162, 56, pal, false);
-        T(x, 'FLOOR ' + this.floor + '/10', 178, 132, fm(10, 600), M.boss ? pal.gold : pal.text); this.floorDots(x, 262, 128, pal);
+        this.floorLabel(x, 178, 132, 10, pal);
         TR.drawBoard(x, g, {x0: 16, y0: 152, cs: 21, pal, style: 'stone', red: this.red});
         const nh = 34 + n * 38;
         TR.drawNext(x, g, 240, 146, 108, nh, n, 10, 38, 'stone', pal);
@@ -341,10 +384,10 @@
         runes.forEach(([k, s], i) => { const X = 250, Y = y + i * 20; x.fillStyle = '#241A14'; x.beginPath(); x.arc(X, Y - 4, 8, 0, 7); x.fill(); TR.runeIcon(x, k, X, Y - 4, 11); T(x, s, X + 13, Y, fm(9), pal.text); });
         y += 92;
         T(x, 'RELICS', 244, y, fm(9, 600), pal.muted);
-        this.relics.forEach((id, i) => TR.relicIcon(x, id, 256 + (i % 4) * 26, y + 18 + Math.floor(i / 4) * 26, 18, pal.gold));
+        this.relics.forEach((id, i) => TR.relicIcon(x, id, 256 + (i % 4) * 26, y + 18 + Math.floor(i / 4) * 26, 26));
       } else {
         this.bc = {x: 119, y: 190};
-        T(x, 'FLOOR ' + this.floor + '/10', 24, 26, fm(11, 600), M.boss ? pal.gold : pal.text); this.floorDots(x, 130, 22, pal);
+        this.floorLabel(x, 24, 26, 11, pal, 226); this.floorDots(x, 214 - 9.4 * 9, 22, pal);
         TR.drawBoard(x, g, {x0: 24, y0: 40, cs: 19, pal, style: 'stone', red: this.red});
         const nh = 34 + n * 42;
         TR.drawNext(x, g, 226, 40, 66, nh, n, 10, 42, 'stone', pal);
@@ -352,34 +395,34 @@
         TR.drawHold(x, g, 226, 40 + nh + 10, 66, 70, 10, 'stone', pal);
         T(x, 'DAMAGE', 226, 380, fm(9, 600), pal.muted); T(x, TR.fmtNum(this.dealt), 226, 396, fm(12, 600), pal.text);
         T(x, 'TIME', 226, 414, fm(9, 600), pal.muted); T(x, TR.fmtClock(this.fightTime), 226, 430, fm(12, 600), pal.text);
-        x.save(); TR.rr(x, 304, 24, 392, 276, 12); x.fillStyle = pal.panel; x.fill(); x.clip();
-        x.fillStyle = '#2A1E17'; x.beginPath(); x.arc(490, 300, 172, Math.PI, 0); x.fill();
-        x.fillStyle = '#1A120E'; x.fillRect(304, 262, 392, 40); x.fillStyle = '#3A2A20'; x.fillRect(304, 262, 392, 2);
-        this.torch(x, 334, 196); this.torch(x, 668, 196);
-        TR.drawMonster(x, M.id, 480, 192, M.boss ? 1.1 : 1, this.t, this.mon);
+        x.save(); TR.rr(x, 304, 24, 392, 276, 12); x.clip();
+        TR.dungeonBg(x, 304, 24, 392, 276, this.t, M.tier, {archX: 176, archR: 122, torches: [28, 364]});
+        TR.drawMonster(x, M.id, 480, 192, M.boss ? 1.08 : 1, this.t, this.mon.st, M.tier);
         x.restore();
-        T(x, M.name + (M.boss ? '  · BOSS' : ''), 320, 50, fd(13), M.boss ? pal.gold : pal.text);
-        T(x, 'HP ' + Math.ceil(this.mon.hp) + ' / ' + M.hp, 684, 50, fm(11, 600), pal.muted, 'right');
-        this.hpBar(x, 320, 58, 364, pal);
+        TR.rr(x, 304, 24, 392, 276, 12); x.strokeStyle = M.tier ? TR.alpha(TR.TIER_COLOR[M.tier], .6) : pal.stroke; x.lineWidth = 1.5; x.stroke();
+        T(x, M.name + (M.boss ? '  · BOSS' : ''), 320, 50, fd(13), M.boss ? pal.gold : M.tier ? TR.TIER_COLOR[M.tier] : pal.text);
+        T(x, 'HP ' + Math.ceil(this.mon.hp) + ' / ' + M.hp, 684, 50, fm(11, 600), pal.soft, 'right');
+        this.hpBar(x, 320, 58, 364);
         this.intentBox(x, 572, 84, 116, 70, pal, true);
         T(x, 'RELICS', 304, 326, fm(10, 600), pal.muted);
         if (!this.relics.length) T(x, 'None yet. Beat a floor to choose one.', 304, 352, fm(11), pal.muted);
-        this.relics.forEach((id, i) => { const X = 304 + i * 42; TR.rr(x, X, 334, 36, 36, 7); x.fillStyle = '#241A14'; x.fill(); x.strokeStyle = pal.stroke; x.lineWidth = 1; x.stroke(); TR.relicIcon(x, id, X + 18, 352, 22, pal.gold); });
+        this.relics.forEach((id, i) => { const X = 304 + i * 42; TR.rr(x, X, 334, 36, 36, 7); x.fillStyle = '#241A14'; x.fill(); x.strokeStyle = pal.stroke; x.lineWidth = 1; x.stroke(); TR.relicIcon(x, id, X + 18, 352, 34); });
         T(x, 'RUNES', 304, 398, fm(10, 600), pal.muted);
         runes.forEach(([k, s], i) => { const X = 314 + i * 98; x.fillStyle = '#241A14'; x.beginPath(); x.arc(X, 414, 9, 0, 7); x.fill(); TR.runeIcon(x, k, X, 414, 12); T(x, s, X + 14, 418, fm(10), pal.text); });
-        if (!TR.isTouch) this.keyHintShort(x, pal);
+        if (!TR.isTouch) T(x, 'Esc pause', 696, 440, fm(10), pal.muted, 'right');
       }
       this.fx.draw(x);
       if (this.state === 'intro') {
-        const k = Math.min(1, this.st / .25) * (this.st > 1.3 ? Math.max(0, 1 - (this.st - 1.3) / .3) : 1);
-        x.globalAlpha = k; x.fillStyle = 'rgba(14,9,7,.82)'; x.fillRect(0, 0, S.w, S.h);
-        T(x, 'FLOOR ' + this.floor, S.w / 2, S.h / 2 - 24, fd(port ? 26 : 30), pal.gold, 'center');
-        T(x, M.name + (M.boss ? ' · BOSS' : ''), S.w / 2, S.h / 2 + 10, fd(port ? 15 : 17), pal.text, 'center');
-        T(x, 'Attacks every ' + M.every + ' pieces', S.w / 2, S.h / 2 + 38, fm(12), pal.muted, 'center');
+        const dur = this.tierStart() ? 2.4 : 1.6, k = Math.min(1, this.st / .25) * (this.st > dur - .3 ? Math.max(0, 1 - (this.st - dur + .3) / .3) : 1);
+        x.globalAlpha = k; x.fillStyle = 'rgba(14,9,7,.84)'; x.fillRect(0, 0, S.w, S.h);
+        const tc = M.tier ? TR.TIER_COLOR[M.tier] : pal.gold;
+        if (this.tierStart()) T(x, R.TIERS[M.tier].name.toUpperCase() + ' BEGINS', S.w / 2, S.h / 2 - 62, fd(port ? 13 : 15), tc, 'center');
+        T(x, 'FLOOR ' + this.floor, S.w / 2, S.h / 2 - 24, fd(port ? 26 : 30), tc, 'center');
+        T(x, M.name + (M.boss ? ' · BOSS' : ''), S.w / 2, S.h / 2 + 10, fd(port ? 14 : 17), pal.text, 'center');
+        T(x, this.tierStart() ? R.TIERS[M.tier].note : 'Attacks every ' + M.every + ' pieces', S.w / 2, S.h / 2 + 38, fm(port ? 10 : 12), pal.muted, 'center');
         x.globalAlpha = 1;
       }
     }
-    keyHintShort(x, pal) { T(x, 'Esc pause', 696, 440, fm(10), pal.muted, 'right'); }
   }
 
   /* ===================== VERSUS ===================== */
@@ -437,7 +480,9 @@
         let atk = R.attack(i);
         if (!i.flip) pl.charge = Math.min(8, pl.charge + i.lines);
         this.popClear(i, cx, 150, pl.acc);
-        let oy = 0; const say = (s, c) => { this.fx.pop(s, cx, 230 + oy, c, 11, {mono: true, life: 1.4}); oy += 18; };
+        this.burst(g, d.rows, TR.PAL.versus);
+        if (atk >= 4 || i.perfect) this.kick(.3);
+        let oy = 0; const say = (s, c) => { this.fx.pop(s, cx, 230 + oy, c, 11, {mono: true, life: 1.4, outline: true}); oy += 18; };
         if (i.fire) say('Fire +' + i.fire, TR.RUNE_COLOR.fire);
         if (i.ice) { let k = 2 * i.ice; while (k > 0 && pl.pending.length) { const take = Math.min(k, pl.pending[0].n); pl.pending[0].n -= take; k -= take; if (!pl.pending[0].n) pl.pending.shift(); } say('Ice: blocked 2', TR.RUNE_COLOR.ice); }
         if (i.thunder) { pl.pend.thunder += i.thunder; say('Thunder: column cleared', TR.RUNE_COLOR.thunder); }
@@ -447,7 +492,7 @@
           const o = this.P[1 - pl.i], row = d.rows && d.rows.length ? d.rows[0] - TR.HID : 10, amount = atk;
           pl.sent += amount;
           this.fx.shot(cx, pl.y0 + row * pl.cs, o.i ? o.x0 - 9 : o.x0 + 178, o.y0 + 300, '#FF5A5A', () => { o.pending.push({n: amount, gap: Math.floor(Math.random() * TR.COLS)}); });
-          this.fx.pop('+' + amount + ' sent', cx, pl.y0 + row * pl.cs - 8, pl.acc, 12, {mono: true});
+          this.fx.pop('+' + amount + ' sent', cx, pl.y0 + row * pl.cs - 8, pl.acc, 12, {mono: true, outline: true});
         }
       } else if (e === 'afterLock' || e === 'flipEnd') {
         for (; pl.pend.thunder > 0; pl.pend.thunder--) g.clearColumn(g.tallestColumn());

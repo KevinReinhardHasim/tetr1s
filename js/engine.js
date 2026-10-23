@@ -216,7 +216,8 @@
       const p = this.piece;
       if (!p) return;
       const tspin = this.tspinCheck(p), cells = this.cells(p);
-      for (const [X, Y, i] of cells) this.grid[Y][X] = {t: p.type, back: false, rune: p.rune && p.rune.i === i ? p.rune.type : null};
+      // s picks one of a few stone textures, so a block keeps its look when it moves or flips.
+      for (const [X, Y, i] of cells) this.grid[Y][X] = {t: p.type, back: false, rune: p.rune && p.rune.i === i ? p.rune.type : null, s: (this.pieces * 4 + i) % 6};
       this.piece = null; this.pieces++;
       if (this.holdLocked > 0) this.holdLocked--;
       if (this.fog > 0) this.fog--;
@@ -280,7 +281,7 @@
 
     // Turn the board upside down, then let every column fall to the new floor.
     flipGrid() {
-      const r = this.grid.slice().reverse().map(row => row.map(v => v ? {t: v.t, back: !v.back, rune: v.rune} : null));
+      const r = this.grid.slice().reverse().map(row => row.map(v => v ? Object.assign({}, v, {back: !v.back}) : null));
       const ng = emptyGrid(), mv = [];
       for (let X = 0; X < COLS; X++) {
         let k = ROWS - 1;
@@ -308,7 +309,7 @@
         if (this.grid[0].some(Boolean)) { this.topOut('garbage'); return false; }
         this.grid.shift();
         const row = emptyRow();
-        for (let X = 0; X < COLS; X++) if (X !== gap) row[X] = {t: 'G', back: false, rune: null};
+        for (let X = 0; X < COLS; X++) if (X !== gap) row[X] = {t: 'G', back: false, rune: null, s: X % 6};
         this.grid.push(row);
       }
       const p = this.piece;

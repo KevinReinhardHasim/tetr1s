@@ -92,7 +92,8 @@
     },
     renderBests() {
       const rows = [['Marathon', this.best('marathon'), v => TR.fmtNum(v)], ['Sprint 40', this.best('sprint'), v => TR.fmtTime(v)],
-        ['Daily (today)', this.best('daily'), v => TR.fmtNum(v)], ['Dungeon', this.best('dungeon'), v => v >= 11 ? 'Cleared' : 'Floor ' + v]];
+        ['Daily (today)', this.best('daily'), v => TR.fmtNum(v)], ['Dungeon floor', this.best('dungeonFloor'), v => 'Floor ' + v + ' / ' + TR.Rules.FLOORS],
+        ['Dungeon fastest clear', this.best('dungeonTime'), v => TR.fmtTime(v)]];
       $('#bests').innerHTML = rows.map(([k, v, f]) => '<div><dt>' + k + '</dt><dd>' + (v == null ? '—' : f(v)) + '</dd></div>').join('');
     },
     renderFlipBests() {
@@ -127,18 +128,24 @@
     },
     resume() { this.closeOverlay(); this.paused = false; TR.Keys.take(); },
 
+    // Result card. r.buttons replaces the default Play again / Menu pair (used between Dungeon tiers).
     showResult(r) {
       const stats = r.stats.map(s => '<tr><th>' + s[0] + '</th><td>' + s[1] + '</td></tr>').join('');
-      this.overlay('<p class="eyebrow">' + (r.isBest ? 'New best' : '&nbsp;') + '</p><h2>' + r.title + '</h2><p class="headline">' + r.headline + '</p>' +
-        '<table class="stats">' + stats + '</table><div class="actions"><button data-a="again">' + (r.rematch ? 'Rematch' : 'Play again') + '</button><button data-a="quit">Menu</button></div>',
-      {again: () => this.restart(), quit: () => this.quit()}, () => this.quit());
+      const buttons = r.buttons || [{label: r.rematch ? 'Rematch' : 'Play again', fn: () => this.restart()}, {label: 'Menu', fn: () => this.quit()}];
+      const acts = {};
+      buttons.forEach((b, i) => { acts['b' + i] = b.fn; });
+      const eyebrow = r.eyebrow != null ? r.eyebrow : r.isBest ? 'New best' : '';
+      this.overlay('<p class="eyebrow">' + (eyebrow || '&nbsp;') + '</p><h2>' + r.title + '</h2><p class="headline">' + r.headline + '</p>' +
+        (r.note ? '<p class="note-line">' + r.note + '</p>' : '') +
+        '<table class="stats">' + stats + '</table><div class="actions">' + buttons.map((b, i) => '<button data-a="b' + i + '">' + b.label + '</button>').join('') + '</div>',
+      acts, r.noEsc ? null : () => this.quit());
     },
     showChoice(o) {
       const cards = o.options.map((r, i) => '<button class="relic" data-a="pick' + i + '"><canvas width="96" height="96" data-relic="' + r.id + '" aria-hidden="true"></canvas><span class="k">' + (i + 1) + '</span><b>' + r.name + '</b><span>' + r.desc + '</span></button>').join('');
       const acts = {};
       o.options.forEach((r, i) => { acts['pick' + i] = () => { this.closeOverlay(); o.onPick(r); }; });
       this.overlay('<p class="eyebrow">Relic</p><h2>' + o.title + '</h2><p>' + o.sub + '</p><div class="relics">' + cards + '</div>', acts, null, o.options.length);
-      $$('#overlay canvas[data-relic]').forEach(c => { const x = c.getContext('2d'); x.scale(2, 2); TR.relicIcon(x, c.dataset.relic, 24, 24, 34, '#FFC46B'); });
+      $$('#overlay canvas[data-relic]').forEach(c => { const x = c.getContext('2d'); x.scale(2, 2); TR.relicIcon(x, c.dataset.relic, 24, 25, 46); });
     },
     overlay(html, actions, onEsc, digits) {
       const o = $('#overlay');
@@ -275,8 +282,12 @@
         if (!this.paused && !this.overlayOpen) {
           if (codes.indexOf('Escape') >= 0 || (this.mode.kind !== 'versus' && codes.indexOf('KeyP') >= 0)) this.pause();
           else this.mode.update(dt, codes);
-        }
+        } else if (this.overlayOpen && !this.paused) this.mode.fxOnly(dt);
+        const sh = this.mode.shake, k = sh > 0 ? Math.min(1, sh / .3) * 7 : 0;
+        this.ctx.save();
+        if (k) { const S = this.mode.size(this.port); this.ctx.fillStyle = '#05070F'; this.ctx.fillRect(0, 0, S.w, S.h); this.ctx.translate(Math.sin(now * .09) * k, Math.cos(now * .07) * k * .7); }
         this.mode.draw(this.ctx, this.port);
+        this.ctx.restore();
       }
       requestAnimationFrame(t => this.loop(t));
     }
