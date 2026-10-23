@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Tetr1s</title>
+<meta name="description" content="Tetr1s is a block-stacking game where the board flips upside down, folklore monsters fight back, and two players can battle on one keyboard.">
+<meta name="theme-color" content="#0A0F22">
+<link rel="icon" href="assets/icon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<main id="app">
+
+  <section id="scr-menu" class="screen">
+    <div class="wrap">
+      <div class="logo-box"><canvas id="logo" role="img" aria-label="Tetr1s"></canvas></div>
+      <p class="tagline">Flip it. Fight it. Beat a friend.</p>
+      <nav class="modes" aria-label="Game modes">
+        <button class="mode" data-go="flip"><span class="name">Flip</span><span class="desc">The board turns upside down every 7 pieces. Marathon, Sprint 40, Daily.</span><span class="tag">Laptop + phone</span></button>
+        <button class="mode" data-go="dungeon"><span class="name">Dungeon</span><span class="desc">Clear lines to fight 10 floors of folklore monsters. Runes and relics.</span><span class="tag">Laptop + phone</span></button>
+        <button class="mode" data-go="versus" id="btn-versus"><span class="name">Versus</span><span class="desc">Two players, one keyboard. Send garbage, flip your board, best of 3.</span><span class="tag">Laptop only</span></button>
+        <div class="row2">
+          <button class="mode small" data-go="howto"><span class="name">How to play</span></button>
+          <button class="mode small" data-go="settings"><span class="name">Settings</span></button>
+        </div>
+      </nav>
+      <section class="bests-box" aria-label="Your best results">
+        <h2>Your best</h2>
+        <dl id="bests" class="bests"></dl>
+      </section>
+      <footer class="foot">
+        <p>Made by Kevin Reinhard Hasim · HTML, CSS and JavaScript</p>
+        <p>Tetr1s is a fan-made game inspired by Tetris and is not affiliated with The Tetris Company.</p>
+      </footer>
+    </div>
+  </section>
+
+  <section id="scr-flip" class="screen" hidden>
+    <div class="wrap">
+      <h1 class="title">Flip</h1>
+      <p class="lead">Every 7 pieces the board flips upside down. Every block falls to the new floor, so holes close by themselves and full rows clear for bonus points.</p>
+      <nav class="modes" aria-label="Flip modes">
+        <button class="mode" data-flip="marathon"><span class="name">Marathon</span><span class="desc">Clear 150 lines. Speed rises every 10 lines.</span><span class="tag">Best <b id="best-marathon">—</b></span></button>
+        <button class="mode" data-flip="sprint"><span class="name">Sprint 40</span><span class="desc">Clear 40 lines as fast as you can.</span><span class="tag">Best <b id="best-sprint">—</b></span></button>
+        <button class="mode" data-flip="daily"><span class="name">Daily</span><span class="desc">3 minutes, highest score. Everyone gets the same pieces today (<span id="daily-date"></span>).</span><span class="tag">Today <b id="best-daily">—</b></span></button>
+        <button class="mode small" data-go="menu"><span class="name">Back</span></button>
+      </nav>
+    </div>
+  </section>
+
+  <section id="scr-howto" class="screen" hidden>
+    <div class="wrap prose">
+      <h1 class="title">How to play</h1>
+      <h2>The basics</h2>
+      <p>Move and rotate the falling pieces to fill complete rows. A full row clears. If the stack reaches the top, the run ends.</p>
+      <p>Hold saves a piece for later (once per piece). The outline at the bottom shows where the piece will land. Clearing 4 rows at once is a Quad; turning a T piece into a tight slot is a T-spin. Both are worth more, and doing them back to back adds a bonus.</p>
+      <h2>Flip</h2>
+      <p>A counter counts down 7 pieces, then the board flips upside down. Every column falls to the new floor, so gaps close. After a flip, row <i>n</i> from the bottom is full when every column holds at least <i>n</i> blocks. Blocks that have been flipped show their striped back side.</p>
+      <h2>Dungeon</h2>
+      <p>Each cleared row damages the monster. The box next to the monster shows its next attack and how many pieces you have left: garbage rows from below, a locked Hold, or a hidden Next queue. The boss on floor 10 flips your board. Beat a floor to pick 1 of 3 relics.</p>
+      <ul>
+        <li><b class="r-fire">Fire</b> adds 15 damage (Versus: 1 extra garbage row).</li>
+        <li><b class="r-ice">Ice</b> delays the next attack by 2 pieces (Versus: blocks 2 incoming rows).</li>
+        <li><b class="r-thunder">Thunder</b> empties your tallest column.</li>
+        <li><b class="r-leaf">Leaf</b> removes 1 garbage row.</li>
+      </ul>
+      <p>Runes trigger when the row they sit in is cleared.</p>
+      <h2>Versus</h2>
+      <p>Two players share one keyboard. Clearing 2, 3 or 4 rows sends 1, 2 or 4 garbage rows to the other player; T-spins, combos and back-to-back send more. Incoming garbage waits in the red meter and rises when you lock a piece without clearing. Your clears cancel it first.</p>
+      <p>Every cleared row charges your Flip meter. At 8, press your Flip key to flip your own board. Rows that fill up after the flip count as an attack. Speed rises every 30 seconds. First to win 2 rounds wins.</p>
+      <h2>Default keys</h2>
+      <table class="keytable">
+        <thead><tr><th>Action</th><th>Solo</th><th>Player 1</th><th>Player 2</th></tr></thead>
+        <tbody>
+          <tr><td>Move</td><td>← →</td><td>A D</td><td>← →</td></tr>
+          <tr><td>Soft drop</td><td>↓</td><td>S</td><td>↓</td></tr>
+          <tr><td>Hard drop</td><td>Space</td><td>Space</td><td>Enter</td></tr>
+          <tr><td>Rotate left / right</td><td>Z / ↑ or X</td><td>Q / W</td><td>. / ↑</td></tr>
+          <tr><td>Hold</td><td>C or L Shift</td><td>L Shift</td><td>R Shift</td></tr>
+          <tr><td>Flip</td><td>automatic</td><td>E</td><td>/</td></tr>
+          <tr><td>Pause</td><td>Esc or P</td><td colspan="2">Esc</td></tr>
+        </tbody>
+      </table>
+      <p>On a phone, use the buttons under the board and tap the HOLD box to hold. All keys can be changed in Settings.</p>
+      <button class="mode small" data-go="menu"><span class="name">Back</span></button>
+    </div>
+  </section>
+
+  <section id="scr-settings" class="screen" hidden>
+    <div class="wrap">
+      <h1 class="title">Settings</h1>
+      <section class="setgroup">
+        <h2>Handling</h2>
+        <label class="range" for="set-das"><span>Auto-repeat delay (DAS)</span><input id="set-das" type="range" min="50" max="300" step="1"><output id="out-das"></output></label>
+        <label class="range" for="set-arr"><span>Auto-repeat rate (ARR)</span><input id="set-arr" type="range" min="0" max="100" step="1"><output id="out-arr"></output></label>
+        <label class="range" for="set-sdf"><span>Soft drop speed</span>
+          <select id="set-sdf"><option value="5">5×</option><option value="10">10×</option><option value="20">20×</option><option value="40">40×</option><option value="inf">Instant</option></select><output></output></label>
+      </section>
+      <section class="setgroup">
+        <h2>Sound</h2>
+        <label class="range" for="set-vol"><span>Volume</span><input id="set-vol" type="range" min="0" max="100" step="1"><output id="out-vol"></output></label>
+      </section>
+      <section class="setgroup">
+        <h2>Controls</h2>
+        <p class="hint">Click a key, then press the new one. Delete removes a second key. Esc cancels.</p>
+        <p class="warn" id="bind-warn" hidden>Some keys are used by both players. In Versus, each player needs their own keys.</p>
+        <div id="binds" class="binds"></div>
+        <p class="hint">Some laptop keyboards cannot register many keys pressed at the same time. If a key does nothing while your friend holds theirs, move one player to other keys.</p>
+      </section>
+      <div class="row2">
+        <button class="mode small" id="set-reset"><span class="name">Reset to defaults</span></button>
+        <button class="mode small" data-go="menu"><span class="name">Back</span></button>
+      </div>
+    </div>
+  </section>
+
+  <section id="scr-game" class="screen game" hidden>
+    <canvas id="game" aria-label="Game board"></canvas>
+    <div id="touch" class="touchbar" hidden>
+      <button data-k="TouchLeft" aria-label="Move left"><svg viewBox="0 0 24 24"><path d="M15 5 8 12l7 7" /></svg></button>
+      <button data-k="TouchSoft" aria-label="Soft drop"><svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6" /></svg></button>
+      <button data-k="TouchRight" aria-label="Move right"><svg viewBox="0 0 24 24"><path d="M9 5l7 7-7 7" /></svg></button>
+      <button data-k="TouchRotate" aria-label="Rotate"><svg viewBox="0 0 24 24"><path d="M19 12a7 7 0 1 1-2.1-5" /><path d="M18 3v5h-5" /></svg></button>
+      <button data-k="TouchHard" aria-label="Hard drop"><svg viewBox="0 0 24 24"><path d="M12 4v11M7 11l5 5 5-5M6 20h12" /></svg></button>
+    </div>
+    <button id="btn-pause" class="pausebtn" aria-label="Pause"><svg viewBox="0 0 24 24"><path d="M9 6v12M15 6v12" /></svg></button>
+  </section>
+
+  <div id="overlay" class="overlay" hidden><div id="overlay-card" class="card" role="dialog" aria-modal="true"></div></div>
+  <p id="note" class="note" role="status" hidden></p>
+</main>
+
+<script src="js/util.js"></script>
+<script src="js/engine.js"></script>
+<script src="js/rules.js"></script>
+<script src="js/art.js"></script>
+<script src="js/input.js"></script>
+<script src="js/audio.js"></script>
+<script src="js/modes.js"></script>
+<script src="js/main.js"></script>
+</body>
+</html>
