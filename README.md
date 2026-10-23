@@ -2,7 +2,9 @@
 
 A block-stacking game where the board flips upside down, fantasy monsters fight back, and two players can battle on one keyboard. It runs in the browser with plain HTML, CSS and JavaScript. There is no build step and no dependencies.
 
-**Play:** open `index.html`, or visit the GitHub Pages link once the repository is published.
+**Play in your browser:** https://kevinreinhardhasim.github.io/tetr1s/
+
+Flip and Dungeon work on laptops and phones. Versus needs a keyboard, so play it on a laptop or PC. You can also clone the repository and open `index.html`.
 
 ## Modes
 
